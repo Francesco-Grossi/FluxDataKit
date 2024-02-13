@@ -1,0 +1,49 @@
+```{r}
+# library loading
+library(dplyr)
+library(reshape2)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+# output directory creation
+out_path <- paste0(getwd(), "/images/")
+dir.create(out_path, showWarnings = F)
+```
+
+```{r}
+# data loading (check the directory)
+data <- readRDS( "data/rsofun_driver_data_clean.rds")
+
+# choose two random sites
+sites <- c("ES-Amo","FR-Pue")
+
+# long list creation
+hhdf <- lapply(sites, function(site){
+  tmp <- as.data.frame(data[data$sitename == site,][[4]])
+})
+names(hhdf) <- sites
+
+```{r}
+# plotting and saving in PDF and PNG
+multi_plot <- lapply(sites,function(site){
+  figures_prefix <- paste0(out_path, site)
+  cairo_pdf(filename = paste0(figures_prefix, "_fig1_ddf_24hr_mean.pdf"))
+  png(filename = paste0(figures_prefix, "_fig1_ddf_24hr_mean.png"), height=700*3, width=700*3, res = 300)
+  tmp <- hhdf[names(hhdf)==site]
+  names(tmp) <- NULL
+  tmp <- as.data.frame(tmp)
+  gg <- tmp|>
+    melt("date")|>
+    ggplot(aes(y=value, x=date)) +
+    geom_line(col = "springgreen4") +
+    theme_classic() +
+    ggtitle(site) +
+    theme(strip.background = element_rect(color = "white", size = 1))+
+    facet_wrap(~variable, scales = "free")
+
+  gg |> print()
+  dev.off()
+})
+```
