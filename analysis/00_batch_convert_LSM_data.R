@@ -3,29 +3,51 @@
 options(tidyverse.quiet = TRUE)
 options(dplyr.summarise.inform = FALSE)
 lapply(list.files("R/","*.R", full.names = TRUE), source)
+
 library(FluxDataKit)
 library(FluxnetLSM)
 library(dplyr)
 library(ingestr)
 library(rsofun)
 
-input_path <- "~/data/FluxDataKit/FDK_inputs"  # "/data/scratch/FDK_inputs"
-output_path <- "~/data/FluxDataKit/v3"  #  "/data/scratch/beta-v4"
+input_path <- "/data_2/FluxDataKit/FDK_inputs/"
+output_path <- "/data_2/FluxDataKit/v3.4/"
 
 sites <- FluxDataKit::fdk_site_info |>
   mutate(
     data_path = file.path(input_path, "flux_data/")
   )
-  # filter(sitename %in% failed_sites)
 
-# sites <- sites |>
-#   filter(sitename == "CH-Lae")
-# df <- readr::read_csv("~/data/FluxDataKit/FDK_inputs/flux_data/ameriflux/AMF_US-Ha1_FLUXNET_FULLSET_HR_1991-2020_3-5.csv")
-# df <- readr::read_csv("~/data/FluxDataKit/FDK_inputs/flux_data/icos_warmwinter2020/FLX_CH-Lae_FLUXNET2015_FULLSET_HH_2004-2020_beta-3.csv")
-# plot(df$LE_F_MDS_QC)
+# site subset------------------
+# xxx debug
+# # missing patm
+# use_sites <- c(
+#   "BE-Maa", "CH-Aws", "CH-Cha", "CH-Dav", "CH-Fru", "CH-Oe2", "CZ-Lnz", "CZ-wet",
+#   "DE-Akm", "DE-Geb", "DE-Gri", "DE-Hzd", "DE-Kli", "DE-Obe", "DE-Tha", "FI-Hyy",
+#   "FI-Ken", "FI-Sii", "FR-FBn", "FR-Lam", "GF-Guy", "GL-Dsk", "IT-Lav", "IT-MBo",
+#   "IT-Tor", "RU-Fyo"
+# )
+use_sites <- c(
+  "AR-TF1"
+  # "FI-Hyy", # Boreal Forests/Taiga
+  # "US-SRM", # Deserts & Xeric Shrublands
+  # "FR-Pue", # Mediterranean Forests, Woodlands & Scrub
+  # "DE-Hai", # Temperate Broadleaf & Mixed Forests
+  # "DE-Gri",
+  # "DE-Tha"
+  # "US-Tw1", # Temperate Grasslands, Savannas & Shrublands
+  # "AU-How", # Tropical & Subtropical Grasslands, Savannas & Shrubland
+  # "BR-Sa3", # Tropical
+  # "ZM-Mon", # Tropical deciduous forest (xeric woodland)
+  # "US-ICh"  # Tundra
+)
+
+# use_sites <- readRDS(here::here("data/failed_sites.rds"))
+sites <- sites |>
+  filter(sitename %in% use_sites)
+# ----------------------------
 
 #---- create a new release ----
-
 fdk_release(
   df = sites,
   input_path = input_path,
@@ -35,37 +57,43 @@ fdk_release(
 )
 
 #---- create matching plots ----
-
 # loop over all sites and plot all time series
 failed_sites <- lapply(sites$sitename, function(site){
   message(sprintf("Processing %s ----", site))
 
+  # This is done already in fdk_release()
   message("- converting to FLUXNET format")
-  df <- suppressWarnings(try(fdk_convert_lsm(
-    site = site,
-    fluxnet_format = TRUE,
-    path = file.path(output_path, "lsm"),
-    overwrite = FALSE
-  )
-  ))
+  df <- suppressWarnings(
+    try(
+      fdk_convert_lsm(
+        site = site,
+        fluxnet_format = TRUE,
+        path = file.path(output_path, "lsm"),
+        out_path = file.path(output_path, "fluxnet"),
+        overwrite = TRUE
+        )
+      )
+    )
 
-  if(inherits(df, "try-error")){
+  if (inherits(df, "try-error")){
     message("!!! conversion to FLUXNET failed  !!!")
     return(site)
   }
 
-  message("- plotting HH FLUXNET data")
-  filename <- suppressMessages(
-    suppressWarnings(
-      try(fdk_plot(
-        df,
-        site = site,
-        out_path = file.path(output_path, "plots"),
-        overwrite = FALSE
-      )
-      )
-    )
-  )
+  # not plotting these anymore - too slow and too large and too obscure
+  # message("- plotting HH FLUXNET data")
+  # filename <- suppressMessages(
+  #   suppressWarnings(
+  #     try(
+  #       fdk_plot(
+  #         df,
+  #         site = site,
+  #         out_path = file.path(output_path, "plots"),
+  #         overwrite = FALSE
+  #       )
+  #     )
+  #   )
+  # )
 
   message("- plotting DD FLUXNET data")
   # get file name path
@@ -75,24 +103,30 @@ failed_sites <- lapply(sites$sitename, function(site){
     recursive = TRUE
     )
 
-  df <- read.csv(file.path(file.path(output_path, "fluxnet"), filn))
+  if (length(filn) > 0){
+    df <- read.csv(file.path(file.path(output_path, "fluxnet"), filn))
 
-  filename <- suppressMessages(
-    suppressWarnings(
-      try(fdk_plot(
-        df,
-        site = site,
-        out_path = file.path(output_path, "plots"),
-        overwrite = TRUE,
-        daily = TRUE
-      )
+    filename <- suppressMessages(
+      suppressWarnings(
+        try(
+          fdk_plot(
+            df,
+            site = site,
+            out_path = file.path(output_path, "plots"),
+            overwrite = FALSE,
+            daily = TRUE
+          )
+        )
       )
     )
-  )
 
-  if(inherits(filename, "try-error")){
-    message("!!! plotting failed !!!")
-    return(site)
+    if(inherits(filename, "try-error")){
+      message("!!! plotting failed !!!")
+      return(site)
+    }
+
+  } else {
+    message("Warning: No daily plot created for this site.")
   }
 
   return(NULL)

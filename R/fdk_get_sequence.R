@@ -26,10 +26,28 @@ fdk_get_sequence <- function(
     out_path = "data/tmp"
 ){
 
+  # identify spurious values based on repeated numerically matching values
+  value_counts_gpp <- table(df$GPP_NT_VUT_REF)
+  value_counts_le <- table(df$LE_F_MDS)
+  value_counts_lecorr <- table(df$LE_CORR)
+
+  # Identify spurious values (those appearing more than once)
+  spurious_values_gpp <- as.numeric(names(value_counts_gpp[value_counts_gpp > 1]))
+  spurious_values_le <- as.numeric(names(value_counts_le[value_counts_le > 1]))
+  spurious_values_lecorr <- as.numeric(names(value_counts_lecorr[value_counts_lecorr > 1]))
+
+  # create variable in data frame
+  df$gpp_spurious <- FALSE
+  df$gpp_spurious[which(df$GPP_NT_VUT_REF %in% spurious_values_gpp)] <- TRUE
+  df$le_spurious <- FALSE
+  df$le_spurious[which(df$LE_F_MDS %in% spurious_values_le)] <- TRUE
+  df$lecorr_spurious <- FALSE
+  df$lecorr_spurious[which(df$LE_CORR %in% spurious_values_lecorr)] <- TRUE
+
   df <- df |>
-    mutate(good_gpp = ifelse(NEE_VUT_REF_QC > qc_threshold, TRUE, FALSE),
-           good_le = ifelse(LE_F_MDS_QC > qc_threshold, TRUE, FALSE),
-           good_lecorr = ifelse(LE_F_MDS_QC > qc_threshold & !is.na(LE_CORR), TRUE, FALSE)
+    mutate(good_gpp = ifelse(NEE_VUT_REF_QC > qc_threshold & !gpp_spurious, TRUE, FALSE),
+           good_le = ifelse(LE_F_MDS_QC > qc_threshold & !le_spurious, TRUE, FALSE),
+           good_lecorr = ifelse(LE_F_MDS_QC > qc_threshold & !is.na(LE_CORR) & !lecorr_spurious, TRUE, FALSE)
            )
 
   out <- get_sequence_byvar(site, df, df$good_gpp, leng_threshold, TRUE) |>
@@ -212,23 +230,21 @@ get_sequence_byvar <- function(site, df, good, leng_threshold, do_merge){
 
 }
 
+## Returns a dataframe that contains information about events (starting index and length)
+## of consecutive conditions (TRUE) in a boolean vector ('good' - naming is a legacy).
 get_consecutive <- function(
     good,
     merge_threshold = 5,
     leng_threshold = 5,
     do_merge = FALSE
     ){
-  ##------------------------------------
-  ## Returns a dataframe that contains information about events (starting index and length)
-  ## of consecutive conditions (TRUE) in a boolean vector ('good' - naming is a legacy).
-  ##------------------------------------
 
   ## replace NAs with FALSE (no drought). This is needed because of NAs at head or tail
   good[ which(is.na(good)) ] <- FALSE
 
   ## identifies periods where 'good' true for consecutive days of length>leng_threshold and
   ## creates data frame holding each instance's info: start of drought by index in 'good' and length (number of days thereafter)
-  instances <- data.frame( idx_start=c(), len=c() )
+  instances <- data.frame( idx_start = c(), len = c() )
   consecutive_good <- rep( NA, length( good ) )
   ngood  <- 0
   ninst <- 0
@@ -249,7 +265,7 @@ get_consecutive <- function(
   if (ngood > leng_threshold){
     ## create a last instance if the last good period extends to the end of the time series
     ninst <- ninst + 1
-    addrow <- data.frame( idx_start=idx-(ngood), len=ngood )
+    addrow <- data.frame( idx_start = idx-(ngood), len = ngood )
     instances <- rbind( instances, addrow )
   }
 
@@ -278,7 +294,7 @@ get_consecutive <- function(
       }
 
       # if all is merged until the end
-      instances_merged$len[idx_merged] <- instances$idx_start[idx] + instances$len[idx] - instances_merged$idx_start[idx_merged]
+      instances_merged$len[idx_merged] <- instances$idx_start[idx] + instances$len[idx] - instances_merged$idx_start[idx_merged] + 1
 
       instances <- instances_merged[,c("idx_start", "len")]
     } else {

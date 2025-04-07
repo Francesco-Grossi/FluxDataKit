@@ -53,9 +53,10 @@ fdk_format_drivers <- function(
   list_flux <- lapply(site_info$sitename, function(site){
 
     # get file name path
-    filn <- list.files(path,
+    filn <- list.files(paste0(path, "/fluxnet/"),
                        pattern = paste0("FLX_", site, ".*_FULLSET_DD.*.csv"),
-                       recursive = TRUE
+                       recursive = TRUE,
+                       full.names = TRUE
     )
 
     # conversion factor from SPLASH: flux to energy conversion,
@@ -63,7 +64,7 @@ fdk_format_drivers <- function(
     kfFEC <- 2.04
 
     # read from FLUXNET-standard file with daily variables
-    df_flux <-  read.csv(file.path(path, filn)) |>
+    df_flux <-  read.csv(file.path(filn)) |>
 
        dplyr::mutate(
 
@@ -102,41 +103,53 @@ fdk_format_drivers <- function(
          # maximum daily temperature (deg C)
          tmax = TMAX_F_MDS,
 
+         # wind speed (m/s)
+         vwind = WS_F,
+
          # fraction of absorbed photosynthetically active radiation
          fapar = FPAR,
 
          # atmospheric CO2 concentration in ppmv
          co2 = CO2_F_MDS,
 
-         # used as target data for rsofun, not forcing
+         # Variables below are used as target data for rsofun, not forcing
          # gross primary production
          gpp = GPP_NT_VUT_REF,
          gpp_qc = NEE_VUT_REF_QC,
 
-         # energy balance-corrected latent heat flux (~ evapotranspiration)
-         le = LE_CORR,
-         le_qc = LE_F_MDS_QC
+         # non-energy balance-corrected latent heat flux (~ evapotranspiration)
+         # This was changed back to non-EBC because daily EBC-LE was larger than
+         # net radiation for a substantial number of data points. This makes it
+         # impossible to meaningfully model LE and prohibits robust model
+         # calibration.
+         le = LE_F_MDS,
+         le_qc = LE_F_MDS_QC,
+
+         # net ecosystem exchange
+         nee = NEE_VUT_REF,
+         nee_qc = NEE_VUT_REF_QC
       )
 
+    # fill missing net radiation data
     df_flux <- df_flux |>
       dplyr::group_by(sitename) |>
       tidyr::nest() |>
-      mutate(
+      dplyr::mutate(
         data = purrr::map(data, ~fill_netrad(.))
       )
 
     #---- Processing CRU data (for cloud cover CCOV) ----
     ccov <- fdk_process_cloud_cover(
-      path = "/Users/benjaminstocker/data/FluxDataKit/FDK_inputs/cloud_cover/",
+      path = "/data_2/FluxDataKit/FDK_inputs/cloud_cover/",
       site = site
     )
 
     df_flux <- df_flux |>
       tidyr::unnest(data) |>
-      left_join(
+      dplyr::left_join(
         ccov, by = c("sitename", "date")
       ) |>
-      group_by(sitename) |>
+      dplyr::group_by(sitename) |>
       tidyr::nest()
 
     # if (geco_system){
@@ -154,7 +167,7 @@ fdk_format_drivers <- function(
     #   # required data
     #
     #   ccov <- fdk_process_cloud_cover(
-    #     path = "/Users/benjaminstocker/data/FluxDataKit/FDK_inputs/cloud_cover/",
+    #     path = "/data_2/FluxDataKit/FDK_inputs/cloud_cover/",
     #     site = site
     #   )
     #
@@ -196,16 +209,16 @@ fdk_format_drivers <- function(
         rain,
         tmin,
         tmax,
+        vwind,
         fapar,
         co2,
         ccov,
         gpp,
         gpp_qc,
+        nee,
+        nee_qc,
         le,
         le_qc
-      ) |>
-      dplyr::mutate(
-        patm = ifelse(patm <= 300, NA, patm)
       ) |>
       dplyr::group_by(sitename) |>
       tidyr::nest()
@@ -235,7 +248,7 @@ fdk_format_drivers <- function(
   # construct the final driver file
   # first join in the site info data
   df_drivers <- site_info |>
-    dplyr::select(sitename, lon, lat, elv, whc) |>
+    dplyr::select(sitename, lon, lat, elv, whc, canopy_height, reference_height) |>
     dplyr::group_by(sitename) |>
     tidyr::nest() |>
     dplyr::rename(
@@ -252,10 +265,10 @@ fdk_format_drivers <- function(
   # join in the parameter settings
   df_drivers <- df_drivers |>
     dplyr::left_join(
-      tibble(
+      dplyr::tibble(
         sitename = site_info$sitename
         ) |>
-        bind_cols(
+        dplyr::bind_cols(
           params_siml |>
             dplyr::slice(rep(1:n(), each = nrow(site_info)))
         ) |>
@@ -273,7 +286,7 @@ fdk_format_drivers <- function(
       site_info,
       forcing
     ) |>
-    ungroup()
+    dplyr::ungroup()
 
   return(df_drivers)
 }
